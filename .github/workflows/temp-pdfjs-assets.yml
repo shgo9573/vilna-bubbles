@@ -1,0 +1,63 @@
+name: Temporary PDF.js asset bundle
+
+on:
+  push:
+    branches:
+      - temp/pdfjs-assets-20261120
+
+permissions:
+  contents: write
+
+jobs:
+  package-pdfjs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official pinned PDF.js package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pdfjs-pack /tmp/pdfjs-extract /tmp/pdfjs-output
+          npm pack pdfjs-dist@4.10.38 --pack-destination /tmp/pdfjs-pack
+          tar -tzf /tmp/pdfjs-pack/pdfjs-dist-4.10.38.tgz | grep -E '^package/(build/pdf.min.mjs|build/pdf.worker.min.mjs|LICENSE)$'
+          tar -xzf /tmp/pdfjs-pack/pdfjs-dist-4.10.38.tgz -C /tmp/pdfjs-extract \
+            package/build/pdf.min.mjs \
+            package/build/pdf.worker.min.mjs \
+            package/LICENSE
+          cp /tmp/pdfjs-extract/package/build/pdf.min.mjs /tmp/pdfjs-output/pdf.min.mjs
+          cp /tmp/pdfjs-extract/package/build/pdf.worker.min.mjs /tmp/pdfjs-output/pdf.worker.min.mjs
+          cp /tmp/pdfjs-extract/package/LICENSE /tmp/pdfjs-output/LICENSE
+          cat > /tmp/pdfjs-output/README.txt <<'EOF'
+PDF.js offline assets
+Version: 4.10.38
+Source package: https://www.npmjs.com/package/pdfjs-dist
+Upstream project: https://github.com/mozilla/pdf.js
+License: Apache-2.0 (see LICENSE)
+The main module and worker are from the same exact npm package version.
+EOF
+          echo "===== SHA256 ====="
+          sha256sum /tmp/pdfjs-output/*
+          echo "===== FILE SIZES ====="
+          ls -lh /tmp/pdfjs-output
+          cd /tmp
+          zip -9 -r pdfjs-offline-4.10.38.zip pdfjs-output
+
+      - name: Upload PDF.js assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfjs-offline-4.10.38
+          path: /tmp/pdfjs-offline-4.10.38.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Remove temporary workflow and branch
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          main_sha=$(gh api "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/temp-pdfjs-assets.yml?ref=main" --jq .sha 2>/dev/null || true)
+          if [ -n "$main_sha" ]; then
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/contents/.github/workflows/temp-pdfjs-assets.yml" \
+              -f message="Remove temporary PDF.js asset workflow" -f sha="$main_sha" -f branch=main || true
+          fi
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/temp%2Fpdfjs-assets-20261120" || true
